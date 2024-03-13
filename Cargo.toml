@@ -1,0 +1,52 @@
+[package]
+name = "crab-cat"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bleasy = "*"
+thiserror = "1.0.57"
+futures = "0.3.30"
+btleplug = "0.11.5"
+uuid = { version = "1.7.0", features = ["v4"] }
+
+
+[dependencies.paris]
+version = "1.5.15"
+default-features = false
+features = ["macros"]
+optional = true
+
+[dependencies.color-eyre]
+version = "0.6.2"
+optional = true
+
+
+[dependencies.clap]
+version = "4.5.1"
+features = ["cargo", "env", "error-context", "wrap_help", "help", "unicode", "color", "derive", "string", "suggestions"]
+optional = true
+
+[dependencies.tracing]
+version = "0.1.40"
+
+
+[dependencies.tracing-subscriber]
+version = "0.3.18"
+optional = true
+features = ["alloc", "ansi", "local-time", "matchers", "fmt", "env-filter", "once_cell", "parking_lot", "smallvec"]
+
+[dependencies.tokio]
+version = "1.36.0"
+features = ["full"]
+
+[features]
+cli = ["dep:clap", "dep:color-eyre", "dep:tracing-subscriber", "dep:paris"]
+default = []
+
+[[bin]]
+path = "src/bin/print_text.rs"
+name = "print-text"
+required-features = ["cli"]
