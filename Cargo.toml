@@ -12,6 +12,14 @@ futures = "0.3.30"
 btleplug = "0.11.5"
 uuid = { version = "1.7.0", features = ["v4"] }
 
+[dependencies.num_enum]
+version = "0.7.2"
+features = ["external_doc"]
+
+
+[dependencies.strum]
+version = "0.26.2"
+features = ["derive"]
 
 [dependencies.paris]
 version = "1.5.15"

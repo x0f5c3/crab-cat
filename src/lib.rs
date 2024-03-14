@@ -5,7 +5,7 @@ mod printer;
 mod command;
 
 
-pub use errors::Error;
+pub use errors::{Error, Result};
 
 
 pub fn add(left: usize, right: usize) -> usize {

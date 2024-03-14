@@ -1,60 +1,61 @@
 use std::sync::mpsc;
-use std::thread;
 use std::time::Duration;
 use crate::command::Command;
 use crate::{Error, Result};
 use btleplug::api::bleuuid::uuid_from_u16;
-use btleplug::api::{Central, CentralEvent, Characteristic, Peripheral, WriteType};
-#[cfg(target_os = "linux")]
-use btleplug::bluez::{manager::Manager, peripheral::Peripheral as NativePeripheral};
-#[cfg(target_os = "windows")]
-use btleplug::winrtble::{manager::Manager, peripheral::Peripheral as NativePeripheral};
+use btleplug::api::{Central, CentralEvent, Manager as _, Characteristic, Peripheral, WriteType, ScanFilter};
+// #[cfg(target_os = "linux")]
+// use btleplug::bluez::{manager::Manager, peripheral::Peripheral as NativePeripheral};
+// #[cfg(target_os = "windows")]
+use btleplug::platform::{Manager, Peripheral as NativePeripheral};
+use color_eyre::eyre::ContextCompat;
+use futures::StreamExt;
 use uuid::Uuid;
 
 pub const COMMAND_SERVICE_UUID: Uuid = uuid_from_u16(0xaf30);
 pub const COMMAND_CHARACTERISTIC_UUID: Uuid = uuid_from_u16(0xae01);
 
-pub fn find_printer() -> Result<Printer<NativePeripheral>> {
-    let manager = Manager::new().unwrap();
-    let adapters = manager.adapters().unwrap();
-    let central = adapters.into_iter().next().unwrap();
+pub async fn find_printer() -> Result<Printer<NativePeripheral>> {
+    let manager = Manager::new().await?;
+    let adapters = manager.adapters().await?;
+    let central = adapters.into_iter().next().wrap_err("No adapters")?;
 
-    let central_recv = central.event_receiver().unwrap();
-    central.start_scan()?;
+    let mut central_recv = central.events().await?;
+    central.start_scan(ScanFilter::default()).await?;
 
     let (addr_send, addr_recv) = mpsc::channel();
-    thread::spawn(move || {
+    tokio::spawn(async move  {
         loop {
-            match central_recv.recv() {
-                Ok(CentralEvent::ServicesAdvertisement {
-                       address, services, ..
+            match central_recv.next().await {
+                Some(CentralEvent::ServicesAdvertisement {
+                       id, services, ..
                    }) => {
                     if services.contains(&COMMAND_SERVICE_UUID) {
                         addr_send
-                            .send(address)
+                            .send(id)
                             .expect("could not send address to main thread");
                     }
                 }
-                Ok(_) => {}
-                // TODO: um
-                Err(_) => {}
+                None =>{},
+                _ => {},
             }
         }
     });
 
     let address = addr_recv
         .recv_timeout(Duration::from_secs(10))
-        .map_err(|_| Error::PrinterNotFound)?;
+        .map_err(|e| Error::PrinterNotFound(e.to_string()))?;
 
-    central.stop_scan()?;
+    central.stop_scan().await?;
 
     let device = central
         .peripherals()
+        .await?
         .into_iter()
-        .find(|p| p.address() == address)
-        .ok_or(Error::PrinterNotFound)?;
+        .find(|p| p.id() == address)
+        .ok_or(Error::PrinterNotFound(format!("No printer with {address}")))?;
 
-    Printer::new(device)
+    Printer::new(device).await
 }
 
 pub struct Printer<D: Peripheral> {
@@ -63,14 +64,14 @@ pub struct Printer<D: Peripheral> {
 }
 
 impl<D: Peripheral> Printer<D> {
-    pub fn new(device: D) -> Result<Self> {
-        device.connect()?;
+    pub async fn new(device: D) -> Result<Self> {
+        device.connect().await?;
 
-        let characteristics = device.discover_characteristics()?;
+        let characteristics = device.characteristics();
         let command_characteristic = characteristics
             .iter()
             .find(|c| c.uuid == COMMAND_CHARACTERISTIC_UUID)
-            .ok_or(Error::PrinterNotFound)?;
+            .ok_or(Error::PrinterNotFound(format!("Printer not found by {COMMAND_CHARACTERISTIC_UUID}")))?;
         let command_characteristic = command_characteristic.clone();
 
         Ok(Printer {
@@ -79,20 +80,20 @@ impl<D: Peripheral> Printer<D> {
         })
     }
 
-    pub fn send(&self, command: &Command) -> Result<()> {
-        self.send_bytes(&command.as_bytes())
+    pub async fn send(&self, command: &Command) -> Result<()> {
+        self.send_bytes(&command.as_bytes()).await
     }
 
-    pub fn send_all(&self, command: &[Command]) -> Result<()> {
+    pub async fn send_all(&self, command: &[Command]) -> Result<()> {
         let buf = command
             .iter()
             .map(Command::as_bytes)
             .flatten()
             .collect::<Vec<_>>();
-        self.send_bytes(&buf)
+        self.send_bytes(&buf).await
     }
 
-    fn send_bytes(&self, bytes: &[u8]) -> Result<()> {
+    async fn send_bytes(&self, bytes: &[u8]) -> Result<()> {
         // TODO: this is the MTU that's negotiated for my device - is this true
         // for all of them?
         const MTU: usize = 248;
@@ -103,7 +104,7 @@ impl<D: Peripheral> Printer<D> {
                 &self.command_characteristic,
                 chunk,
                 WriteType::WithoutResponse,
-            )?;
+            ).await?;
         }
 
         Ok(())

@@ -1,13 +1,49 @@
 use std::convert::TryInto;
+use crate::{Error, Result};
+
+use strum::{EnumIs, EnumCount, FromRepr, VariantArray};
+#[derive(Debug, Ord, Copy, Clone, PartialOrd, Eq, PartialEq, FromRepr, EnumIs, EnumCount, VariantArray)]
+#[repr(u8)]
+pub enum Commands {
+    ApplyEnergy = 0xbe,
+    GetDeviceState = 0xa3,
+    GetDeviceInfo = 0xa8,
+    UpdateDevice = 0xa9,
+    SetDpi = 0xa4,
+    Lattice = 0xa6,
+    Retract = 0xa0,
+    Feed = 0xa1,
+    Speed = 0xbd,
+    Energy = 0xaf,
+    Bitmap = 0xa2,
+}
+
+
+
+impl Commands {
+    pub fn as_u8(&self) -> u8 {
+        (*self) as u8
+    }
+    pub fn from_u8(u: u8) -> Result<Self> {
+        Self::from_repr(u).ok_or(Error::NOTACOMMAND(u))
+    }
+}
+
+
+
+pub enum CommandType {
+    Transfer = 0,
+    Response = 1,
+}
 
 #[derive(Debug, PartialEq)]
 pub struct Command {
-    command: u8,
+    command: Commands,
     payload: Vec<u8>,
 }
 
 impl Command {
-    pub fn new(command: u8, payload: &[u8]) -> Command {
+    pub fn new(command: Commands, payload: &[u8]) -> Command {
         Command {
             command,
             payload: payload.to_vec(),
@@ -17,12 +53,12 @@ impl Command {
     pub fn as_bytes(&self) -> Vec<u8> {
         let payload_length = self.payload.len();
 
-        assert!(payload_length != 0x00, "payload must not be empty");
+        assert_ne!(payload_length, 0x00, "payload must not be empty");
         let payload_length = payload_length
             .try_into()
             .expect("payload must be shorter than 0x100");
 
-        let mut bytes = vec![0x51, 0x78, self.command, 0x00, payload_length, 0x00];
+        let mut bytes = vec![0x51, 0x78, self.command.as_u8(), 0x00, payload_length, 0x00];
         bytes.extend(&self.payload);
         bytes.extend(&[Self::crc(&self.payload), 0xff]);
 
@@ -67,26 +103,26 @@ mod tests {
 
     #[test]
     fn command_as_bytes() {
-        let cmd = Command::new(0xa3, &[0x00]);
+        let cmd = Command::new(Commands::GetDeviceState, &[0x00]);
         assert_eq!(
             cmd.as_bytes(),
             vec![0x51, 0x78, 0xa3, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff]
         );
 
-        let cmd = Command::new(0xa4, &[0x33]);
+        let cmd = Command::new(Commands::SetDpi, &[0x33]);
         assert_eq!(
             cmd.as_bytes(),
             vec![0x51, 0x78, 0xa4, 0x00, 0x01, 0x00, 0x33, 0x99, 0xff]
         );
 
-        let cmd = Command::new(0xaf, &[0x5c, 0x44]);
+        let cmd = Command::new(Commands::Energy, &[0x5c, 0x44]);
         assert_eq!(
             cmd.as_bytes(),
             vec![0x51, 0x78, 0xaf, 0x00, 0x02, 0x00, 0x5c, 0x44, 0x2b, 0xff]
         );
 
         let cmd = Command::new(
-            0xa6,
+            Commands::Lattice,
             &[
                 0xaa, 0x55, 0x17, 0x38, 0x44, 0x5f, 0x5f, 0x5f, 0x44, 0x38, 0x2c,
             ],
